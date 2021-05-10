@@ -61,8 +61,8 @@ class OfflineControllerWithSmallRotation(BaseController):
         images_file_name="images.hdf5",
         debug_mode=True,
         actions=["MoveAhead", "RotateLeft", "RotateRight", "LookUp", "LookDown"],
-        visualize=True,
-        # visualize=False,
+        # visualize=True,
+        visualize=False,
         local_executable_path=None
     ):
 
