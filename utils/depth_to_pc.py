@@ -21,7 +21,7 @@ def intrinsic_from_fov(height=480, width=640, fov=79):
                      [0., 0., 0., 1.]])
 
 K = intrinsic_from_fov(480, 640)
-# print(K)
+print(K)
 K_inv = np.linalg.inv(K)
 
 controller = Controller(
@@ -98,6 +98,8 @@ pixel_coords = pixel_coord_np(640, 480)  # [3, npoints]
 
 # Apply back-projection: K_inv @ pixels * depth
 cam_coords = K_inv[:3, :3] @ pixel_coords * depth.flatten()
+print("K inv: \n{}".format(K_inv))
+print("K inv[:3, :3]: \n{}".format(K_inv[:3, :3]))
 
 
 # Limit points to 150m in the z-direction for visualisation
@@ -191,7 +193,7 @@ def project_topview(cam_points):
         # colors = np.minimum(1, dists / axes_limit / np.sqrt(2))
 
         # Draw Points
-        axes.scatter(bird_eye[0, :], bird_eye[2, :], s=0.1)
+        axes.scatter(bird_eye[0, :], bird_eye[2, :], s=0.1, c='#000000')
 
     plt.gca().set_aspect('equal')
     plt.show()

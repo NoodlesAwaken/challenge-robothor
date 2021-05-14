@@ -108,7 +108,8 @@ class ExhaustiveBFSController(Controller):
 
         super(ExhaustiveBFSController, self).__init__()
         # Allowed rotations.
-        self.rotations = [0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330]
+        # self.rotations = [0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330]
+        self.rotations = [0, 45, 90, 135, 180, 225, 270, 315]
         # Allowed horizons.
         self.horizons = [-30, 0, 30]
 
@@ -298,24 +299,24 @@ class ExhaustiveBFSController(Controller):
                 next_state.z -= self.grid_size
             elif next_state.rotation == 270:
                 next_state.x -= self.grid_size
-            elif next_state.rotation == 30 or 60:
+            elif next_state.rotation == 45:
                 next_state.z += self.grid_size
                 next_state.x += self.grid_size
-            elif next_state.rotation == 120 or 150:
+            elif next_state.rotation == 135:
                 next_state.z -= self.grid_size
                 next_state.x += self.grid_size
-            elif next_state.rotation == 210 or 240:
+            elif next_state.rotation == 225:
                 next_state.z -= self.grid_size
                 next_state.x -= self.grid_size
-            elif next_state.rotation == 300 or 330:
+            elif next_state.rotation == 315:
                 next_state.z += self.grid_size
                 next_state.x -= self.grid_size
             else:
                 raise Exception("Unknown Rotation")
         elif action == "RotateRight":
-            next_state.rotation = (next_state.rotation + 30) % 360
+            next_state.rotation = (next_state.rotation + 45) % 360
         elif action == "RotateLeft":
-            next_state.rotation = (next_state.rotation - 30) % 360
+            next_state.rotation = (next_state.rotation - 45) % 360
         elif action == "LookUp":
             if next_state.horizon == -30:
                 return None
@@ -453,7 +454,7 @@ class ExhaustiveBFSController(Controller):
         self.seen_states = []
         self.visited_seen_states = []
         self.scene_name = scene_name
-        event = self.reset(scene_name)
+        event = self.reset(scene_name, agentMode="locobot", visibilityDistance=20, rotateGaussianSigma=0)
 
         if self.make_seg or self.make_class:
             event = self.step(
@@ -535,7 +536,13 @@ class ExhaustiveBFSController(Controller):
             self.grid_points.append(search_state.position())
 
         if self.make_metadata:
-            self.metadata[str(search_state)] = event.metadata
+            # self.metadata[str(search_state)] = event.metadata
+            # only write visible objects
+            meta = []
+            for o in event.metadata["objects"]:
+                if o["visible"] == True:
+                    meta.append(o)
+            self.metadata[str(search_state)] = meta
 
         if self.make_class:
             class_detections = event.class_detections2D
@@ -552,7 +559,8 @@ class ExhaustiveBFSController(Controller):
             )
 
         if self.make_depth and str(search_state) not in self.depth:
-            self.depth.create_dataset(str(search_state), data=event.depth_frame[::4, ::4])
+            self.depth.create_dataset(str(search_state), data=event.depth_frame)
+            # self.depth.create_dataset(str(search_state), data=event.depth_frame[::4, ::4])
 
         elif str(search_state) in self.images:
             print(self.scene_name, str(search_state))

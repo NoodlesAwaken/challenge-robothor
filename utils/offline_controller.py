@@ -36,14 +36,14 @@ def project_topview(cam_points):
         # flip the y-axis to positive upwards
         y = - y
 
-        # print("y max: {}\ny min: {}".format(max(y),min(y)))
+        # print("y max: {}\ty min: {}".format(max(y),min(y)))
 
         # We sample points for points less than 15m ahead, above ground and under ceiling
-        ind = np.where((z < max_longitudinal) & (y > -1.5) & (y < 0.9))
+        ind = np.where((z < max_longitudinal) & (y > -1.2) & (y < 0.9))
         bird_eye = pts[:3, ind]
 
         # Draw Points
-        axes.scatter(bird_eye[0, :], bird_eye[2, :], s=0.1)
+        axes.scatter(bird_eye[0, :], bird_eye[2, :], s=0.1, c="#000000")
     end_plt = time.time()
     print("get pc time: {} seconds".format(end_plt - start_plt))
 
@@ -147,7 +147,8 @@ class OfflineControllerWithSmallRotation(BaseController):
         self.using_raw_metadata = True
         self.actions = actions
         # Allowed rotations.
-        self.rotations = [0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330]
+        # self.rotations = [0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330]
+        self.rotations = [0, 45, 90, 135, 180, 225, 270, 315]
         # Allowed horizons.
         self.horizons = [-30, 0, 30]
         self.debug_mode = debug_mode
@@ -215,22 +216,21 @@ class OfflineControllerWithSmallRotation(BaseController):
                 graph_json
             ).to_directed()
             # # meta data loading costs 12 seconds
-            # with open(
-            #     os.path.join(
-            #         self.offline_data_dir, self.scene_name, self.metadata_file_name
-            #     ),
-            #     "r",
-            # ) as f:
-            #     self.metadata = json.load(f)
-            #     # Determine if using the raw metadata, which is structured as a dictionary of
-            #     # state -> metatdata. The alternative is a map of obj -> states where object is visible.
-            #     key = next(iter(self.metadata.keys()))
-            #     try:
-            #         float(key.split("|")[0])
-            #         self.using_raw_metadata = True
-            #     except ValueError:
-            #         self.using_raw_metadata = False
-
+            with open(
+                os.path.join(
+                    self.offline_data_dir, self.scene_name, self.metadata_file_name
+                ),
+                "r",
+            ) as f:
+                self.metadata = json.load(f)
+                # Determine if using the raw metadata, which is structured as a dictionary of
+                # state -> metatdata. The alternative is a map of obj -> states where object is visible.
+                key = next(iter(self.metadata.keys()))
+                try:
+                    float(key.split("|")[0])
+                    self.using_raw_metadata = True
+                except ValueError:
+                    self.using_raw_metadata = False
             if self.images is not None:
                 self.images.close()
             self.images = self.h5py.File(
@@ -298,25 +298,39 @@ class OfflineControllerWithSmallRotation(BaseController):
             elif next_state.rotation == 180:
                 next_state.z -= self.grid_size
             elif next_state.rotation == 270:
-                next_state.x -= self.grid_size
-            elif next_state.rotation == 30 or 60:
+                next_state.x -= self.grid_siz            
+            elif next_state.rotation == 45:
                 next_state.z += self.grid_size
                 next_state.x += self.grid_size
-            elif next_state.rotation == 120 or 150:
+            elif next_state.rotation == 135:
                 next_state.z -= self.grid_size
                 next_state.x += self.grid_size
-            elif next_state.rotation == 210 or 240:
+            elif next_state.rotation == 225:
                 next_state.z -= self.grid_size
                 next_state.x -= self.grid_size
-            elif next_state.rotation == 300 or 330:
+            elif next_state.rotation == 315:
                 next_state.z += self.grid_size
-                next_state.x -= self.grid_size
+                next_state.x -= self.grid_siz
+            # elif next_state.rotation == 30 or 60:
+            #     next_state.z += self.grid_size
+            #     next_state.x += self.grid_size
+            # elif next_state.rotation == 120 or 150:
+            #     next_state.z -= self.grid_size
+            #     next_state.x += self.grid_size
+            # elif next_state.rotation == 210 or 240:
+            #     next_state.z -= self.grid_size
+            #     next_state.x -= self.grid_size
+            # elif next_state.rotation == 300 or 330:
+            #     next_state.z += self.grid_size
+            #     next_state.x -= self.grid_size
             else:
                 raise Exception("Unknown Rotation")
         elif action == "RotateRight":
-            next_state.rotation = (next_state.rotation + 30) % 360
+            # next_state.rotation = (next_state.rotation + 30) % 360
+            next_state.rotation = (next_state.rotation + 45) % 360
         elif action == "RotateLeft":
-            next_state.rotation = (next_state.rotation - 30) % 360
+            # next_state.rotation = (next_state.rotation - 30) % 360
+            next_state.rotation = (next_state.rotation + 45) % 360
         elif action == "LookUp":
             if next_state.horizon > -30:
                 next_state.horizon = next_state.horizon - 30
@@ -400,14 +414,20 @@ class OfflineControllerWithSmallRotation(BaseController):
         all_coords = []
         start_rotate = time.time()
 
-        for i in range(12):
+        # for i in range(12):
+        for i in range(8):
             # print("{}|{}|{}|0".format(coords[0], coords[1], i * 30))
             # states.append("{}|{}|{}|0".format(coords[0], coords[1], i * 30))
-            depth_key = str("{}|{}|{}|0".format(coords[0], coords[1], i * 30))
+            # depth_key = str("{}|{}|{}|0".format(coords[0], coords[1], i * 30))
+            # print("rotation: {}".format(coords[2]))
+            rot = (int(coords[2]) + i * 45) % 360
+            depth_key = str("{}|{}|{}|0".format(coords[0], coords[1], rot))
             # states.append(depth_key)
-            depth = self.get_depth(depth_key).repeat(4, axis=0).repeat(4, axis=1)
+            # depth = self.get_depth(depth_key).repeat(4, axis=0).repeat(4, axis=1)
+            depth = self.get_depth(depth_key)
             cam_coords = projection_matrix * depth.flatten()
-            degrees = i * 30
+            # degrees = i * 30
+            degrees = i * 45 
             R = np.matrix([
                 [np.cos(np.deg2rad(degrees)), 0, np.sin(np.deg2rad(degrees))],
                 [0, 1, 0],
@@ -418,54 +438,9 @@ class OfflineControllerWithSmallRotation(BaseController):
 
         end_rotate = time.time()
         print("rotate time: {} seconds".format(end_rotate - start_rotate))
-
-        start_topview = time.time()
-            
         project_topview(all_coords)
 
-        end_topview = time.time()
-        print("topview time: {} seconds".format(end_topview - start_topview))
 
-
-        # if next_state is not None:
-        #     next_state_key = str(next_state)
-        #     neighbors = list(self.graph.neighbors(str(self.state)))
-
-        #     if next_state_key in neighbors:
-        #         self.state = self.get_state_from_str(
-        #             *[float(x) for x in next_state_key.split("|")]
-        #         )
-        #         self.last_action_success = True
-        #         event = self._successful_event()
-        #         if self.debug_mode and self.visualize:
-        #             if self.controller.get_state_from_event(
-        #                 viz_event
-        #             ) != self.controller.get_state_from_event(event):
-        #                 print(action)
-        #                 print(str(self.controller.get_state_from_event(viz_event)))
-        #                 print(str(self.controller.get_state_from_event(event)))
-
-        #             assert self.controller.get_state_from_event(
-        #                 viz_event
-        #             ) == self.controller.get_state_from_event(event)
-        #             assert viz_event.metadata["lastActionSuccess"]
-
-        #             # Uncomment if you want to view the frames side by side to
-        #             # ensure that they are duplicated.
-        #             from matplotlib import pyplot as plt
-        #             fig = plt.figure()
-        #             fig.add_subplot(2,1,1)
-        #             plt.imshow(self.get_image())
-        #             fig.add_subplot(2,1,2)
-        #             plt.imshow(viz_event.frame)
-        #             plt.show()
-
-        #         self.last_event = event
-        #         return event
-
-        # self.last_action_success = False
-        # self.last_event.metadata["lastActionSuccess"] = False
-        # return self.last_event
 
     def shortest_path(self, source_state, target_state):
         return self.nx.shortest_path(self.graph, str(source_state), str(target_state))

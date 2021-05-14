@@ -50,18 +50,11 @@ def search_and_save(in_queue):
 
 def main():
 
-    num_processes = 3
+    num_processes = 4
     
     queue = Queue()
     scene_names = []
-    # for i in range(2):
-    #     for j in range(30):
-    #         if i == 0:
-    #             scene_names.append("FloorPlan" + str(j + 1))
-    #         else:
-    #             scene_names.append("FloorPlan" + str(i + 1) + '%02d' % (j + 1))
     
-    count = 0
     for i in range(12):
         for j in range(5):
             scene_names.append("FloorPlan_Train{}_{}".format(i+1, j+1))
@@ -73,18 +66,15 @@ def main():
     # scene_names.append("FloorPlan_Train5_3")
     for x in scene_names:
         queue.put(x)
-        count = count + 1
-        if count == 3:
-            count = 0
 
-            processes = []
-            for _ in range(num_processes):
-                p = Process(target=search_and_save, args=(queue,))
-                p.start()
-                processes.append(p)
+    processes = []
+    for _ in range(num_processes):
+        p = Process(target=search_and_save, args=(queue,))
+        p.start()
+        processes.append(p)
 
-            for p in processes:
-                p.join()
+    for p in processes:
+        p.join()
 
 if __name__ == "__main__":
     main()
