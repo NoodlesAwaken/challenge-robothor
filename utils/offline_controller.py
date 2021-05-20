@@ -8,48 +8,49 @@ import random
 import os
 import platform
 import numpy as np
-
-# try:
-#     from queue import Queue
-# except ImportError:
-#     from Queue import Queue
+import torch
 
 from ai2thor.controller import Controller, distance
 from base_controller import BaseController
 from bfs_controller import ExhaustiveBFSController, ThorAgentState
 import matplotlib.pyplot as plt
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 def project_topview(cam_points):
-    """
-    Draw the topview projection
-    """
-    start_plt = time.time()
-    max_longitudinal = 15
-    window_x = (-10, 10)
-    window_y = (-10, 10)        
+    # start_plt = time.time()
+    x, y, z = cam_points
+    # flip the y-axis to positive upwards
+    y = - y
+
+    # We sample points for points above ground and under ceiling
+    ind = (y > -1.2) & (y < 0.9)
+    bird_eye = cam_points[:3, ind]
+    bird_eye = bird_eye[[0, 2], :]
+
+    m = torch.zeros(500, 500).cuda()
+    index = ((bird_eye + 10) / 0.04).long()
+
+    m[index[0, :], index[1, :]] = 1
+
+    # end_plt = time.time()
+    # print("bin time: {}".format(end_plt - start_plt))
+
+    # m = m.cpu()
+    # plt.imshow(m)
+    # plt.show()
+
+    # bird_eye = bird_eye.cpu()
+    # window_x = (-10, 10)
+    # window_y = (-10, 10)   
+    # fig, axes = plt.subplots(figsize=(12, 12))
+    # axes.set_xlim(window_x)
+    # axes.set_ylim(window_y)
+    # axes.scatter(bird_eye[0, :], bird_eye[1, :], s=0.1, c="#000000")
+    # plt.show()
+    return m
     
-    fig, axes = plt.subplots(figsize=(12, 12))
-    axes.set_xlim(window_x)
-    axes.set_ylim(window_y)
-    for pts in cam_points:
-        x, y, z = pts
-        # flip the y-axis to positive upwards
-        y = - y
 
-        # print("y max: {}\ty min: {}".format(max(y),min(y)))
-
-        # We sample points for points less than 15m ahead, above ground and under ceiling
-        ind = np.where((z < max_longitudinal) & (y > -1.2) & (y < 0.9))
-        bird_eye = pts[:3, ind]
-
-        # Draw Points
-        axes.scatter(bird_eye[0, :], bird_eye[2, :], s=0.1, c="#000000")
-    end_plt = time.time()
-    print("get pc time: {} seconds".format(end_plt - start_plt))
-
-
-    plt.gca().set_aspect('equal')
-    plt.show()
 
 def get_projection_matrix(height=480, width=640, fov=79):
     """
@@ -74,10 +75,27 @@ def get_projection_matrix(height=480, width=640, fov=79):
     y = np.linspace(0, height - 1, height).astype(np.int)
     [x, y] = np.meshgrid(x, y)
 
-    return K_inv[:3, :3] @ np.vstack((x.flatten(), y.flatten(), np.ones_like(x.flatten())))
+    return torch.from_numpy(K_inv[:3, :3] @ np.vstack((x.flatten(), y.flatten(), np.ones_like(x.flatten())))).cuda()
+
+
+
+def get_rotate_matrix():
+    rotate_matrix = []
+    for i in range(8):
+        # degrees = i * 30
+        degrees = i * 45
+        R = torch.tensor([
+            [np.cos(np.deg2rad(degrees)), 0, np.sin(np.deg2rad(degrees))],
+            [0, 1, 0],
+            [-np.sin(np.deg2rad(degrees)), 0, np.cos(np.deg2rad(degrees))]
+            ], device=device)
+ 
+        rotate_matrix.append(R)
+
+    return rotate_matrix
 
 projection_matrix = get_projection_matrix()
-print(projection_matrix)
+rotate_matrix = get_rotate_matrix()
 
 
 class OfflineControllerWithSmallRotationEvent:
@@ -119,13 +137,11 @@ class OfflineControllerWithSmallRotation(BaseController):
         offline_data_dir="/media/gregory/data/dump/",
         grid_file_name="grid.json",
         graph_file_name="graph.json",
-        # metadata_file_name="visible_object_map.json",
         metadata_file_name='metadata.json',
         images_file_name="images.hdf5",
         depth_file_name="depth.hdf5",
         debug_mode=True,
         actions=["MoveAhead", "RotateLeft", "RotateRight", "LookUp", "LookDown"],
-        # visualize=True,
         visualize=False,
         local_executable_path=None
     ):
@@ -138,6 +154,7 @@ class OfflineControllerWithSmallRotation(BaseController):
         self.metadata_file_name = metadata_file_name
         self.images_file_name = images_file_name
         self.depth_file_name = depth_file_name
+        self.map = None
         self.grid = None
         self.graph = None
         self.metadata = None
@@ -145,6 +162,7 @@ class OfflineControllerWithSmallRotation(BaseController):
         self.depth = None
         self.controller = None
         self.using_raw_metadata = True
+        self.update_map = False
         self.actions = actions
         # Allowed rotations.
         # self.rotations = [0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330]
@@ -286,31 +304,41 @@ class OfflineControllerWithSmallRotation(BaseController):
             raise Exception("Unsupported action.")
 
         action = action["action"]
+        self.update_map = False
         # print("executing action: {}".format(action))
 
         # next_state = self.controller.get_next_state(self.state, action, True)
         next_state = copy.deepcopy(self.state)
         if action == "MoveAhead":
+            self.update_map = True
             if next_state.rotation == 0:
                 next_state.z += self.grid_size
+                shift = (0, -6)
             elif next_state.rotation == 90:
                 next_state.x += self.grid_size
+                shift = (-6, 0)
             elif next_state.rotation == 180:
                 next_state.z -= self.grid_size
+                shift = (0, 6)
             elif next_state.rotation == 270:
-                next_state.x -= self.grid_siz            
+                next_state.x -= self.grid_size
+                shift = (6, 0)
             elif next_state.rotation == 45:
                 next_state.z += self.grid_size
                 next_state.x += self.grid_size
+                shift = (-6, -6)
             elif next_state.rotation == 135:
                 next_state.z -= self.grid_size
                 next_state.x += self.grid_size
+                shift = (-6, 6)
             elif next_state.rotation == 225:
                 next_state.z -= self.grid_size
                 next_state.x -= self.grid_size
+                shift = (6, 6)
             elif next_state.rotation == 315:
                 next_state.z += self.grid_size
-                next_state.x -= self.grid_siz
+                next_state.x -= self.grid_size
+                shift = (6, -6)
             # elif next_state.rotation == 30 or 60:
             #     next_state.z += self.grid_size
             #     next_state.x += self.grid_size
@@ -338,30 +366,30 @@ class OfflineControllerWithSmallRotation(BaseController):
             if next_state.horizon < 30:
                 next_state.horizon = next_state.horizon + 30
 
-        if self.visualize and next_state is not None:
-            viz_event = self.controller.step(
-                dict(
-                    action="Teleport", 
-                    x=next_state.x, 
-                    y=next_state.y, 
-                    z=next_state.z, 
-                    rotation=next_state.rotation, 
-                    horizon=next_state.horizon
-                )
-            )
-            # viz_event = self.controller.step(
-            #     dict(action="Rotate", rotation=next_state.rotation)
-            # )
-            # viz_event = self.controller.step(
-            #     dict(action="Look", horizon=next_state.horizon)
-            # )
-            viz_next_state = self.controller.get_state_from_event(viz_event)
-            if (
-                round(viz_next_state.horizon) not in self.horizons
-                or round(viz_next_state.rotation) not in self.rotations
-            ):
-                # return back to original state.
-                self.controller.teleport_to_state(self.state)
+        # if self.visualize and next_state is not None:
+        #     viz_event = self.controller.step(
+        #         dict(
+        #             action="Teleport", 
+        #             x=next_state.x, 
+        #             y=next_state.y, 
+        #             z=next_state.z, 
+        #             rotation=next_state.rotation, 
+        #             horizon=next_state.horizon
+        #         )
+        #     )
+        #     # viz_event = self.controller.step(
+        #     #     dict(action="Rotate", rotation=next_state.rotation)
+        #     # )
+        #     # viz_event = self.controller.step(
+        #     #     dict(action="Look", horizon=next_state.horizon)
+        #     # )
+        #     viz_next_state = self.controller.get_state_from_event(viz_event)
+        #     if (
+        #         round(viz_next_state.horizon) not in self.horizons
+        #         or round(viz_next_state.rotation) not in self.rotations
+        #     ):
+        #         # return back to original state.
+        #         self.controller.teleport_to_state(self.state)
 
         if next_state is not None:
             next_state_key = str(next_state)
@@ -373,18 +401,18 @@ class OfflineControllerWithSmallRotation(BaseController):
                 )
                 self.last_action_success = True
                 event = self._successful_event()
-                if self.debug_mode and self.visualize:
-                    if self.controller.get_state_from_event(
-                        viz_event
-                    ) != self.controller.get_state_from_event(event):
-                        print(action)
-                        print(str(self.controller.get_state_from_event(viz_event)))
-                        print(str(self.controller.get_state_from_event(event)))
+                # if self.debug_mode and self.visualize:
+                #     if self.controller.get_state_from_event(
+                #         viz_event
+                #     ) != self.controller.get_state_from_event(event):
+                #         print(action)
+                #         print(str(self.controller.get_state_from_event(viz_event)))
+                #         print(str(self.controller.get_state_from_event(event)))
 
-                    assert self.controller.get_state_from_event(
-                        viz_event
-                    ) == self.controller.get_state_from_event(event)
-                    assert viz_event.metadata["lastActionSuccess"]
+                #     assert self.controller.get_state_from_event(
+                #         viz_event
+                #     ) == self.controller.get_state_from_event(event)
+                #     assert viz_event.metadata["lastActionSuccess"]
 
                     # Uncomment if you want to view the frames side by side to
                     # ensure that they are duplicated.
@@ -395,7 +423,14 @@ class OfflineControllerWithSmallRotation(BaseController):
                     # fig.add_subplot(2,1,2)
                     # plt.imshow(viz_event.frame)
                     # plt.show()
+                if self.map is None:
+                    self.map = self.mapping()
+                elif self.update_map:
+                    self.map = self.map.roll(shifts=shift, dims=(0, 1))
+                    self.map += self.mapping()
 
+                # plt.imshow(self.map.cpu())
+                # plt.show()
                 self.last_event = event
                 # print("successful")
                 return event
@@ -407,38 +442,30 @@ class OfflineControllerWithSmallRotation(BaseController):
     
 
     def mapping(self):
-        print("state: {}".format(self.state))
+        if not self.last_action_success:
+            return
+
+
         coords = str(self.state).split('|')
+        start = time.time()
 
-        # states = []
-        all_coords = []
-        start_rotate = time.time()
+        # start_load = time.time()
+        depth_keys = [str("{}|{}|{}|0".format(coords[0], coords[1], rot * 45)) for rot in range(8)]
+        depth = [torch.from_numpy(self.get_depth(key)).cuda().flatten() for key in depth_keys]
+        # end_load = time.time()
 
-        # for i in range(12):
-        for i in range(8):
-            # print("{}|{}|{}|0".format(coords[0], coords[1], i * 30))
-            # states.append("{}|{}|{}|0".format(coords[0], coords[1], i * 30))
-            # depth_key = str("{}|{}|{}|0".format(coords[0], coords[1], i * 30))
-            # print("rotation: {}".format(coords[2]))
-            rot = (int(coords[2]) + i * 45) % 360
-            depth_key = str("{}|{}|{}|0".format(coords[0], coords[1], rot))
-            # states.append(depth_key)
-            # depth = self.get_depth(depth_key).repeat(4, axis=0).repeat(4, axis=1)
-            depth = self.get_depth(depth_key)
-            cam_coords = projection_matrix * depth.flatten()
-            # degrees = i * 30
-            degrees = i * 45 
-            R = np.matrix([
-                [np.cos(np.deg2rad(degrees)), 0, np.sin(np.deg2rad(degrees))],
-                [0, 1, 0],
-                [-np.sin(np.deg2rad(degrees)), 0, np.cos(np.deg2rad(degrees))]
-                ])
-            all_coords.append(np.asarray(np.matmul(R, cam_coords)))
-        # print(states)
+        # start_rotate = time.time()
+        cam_coords = [projection_matrix.mul(depth[i]) for i in range(8)]
+        all_coords = [torch.mm(rotate_matrix[i], cam_coords[i]) for i in range(8)]
+        top = torch.cat(all_coords, 1)
+        # end_rotate = time.time()
 
-        end_rotate = time.time()
-        print("rotate time: {} seconds".format(end_rotate - start_rotate))
-        project_topview(all_coords)
+
+        # total = time.time() - start
+        # print("\ntotal loop time: {}\n".format(total))
+        # print("load time: {}".format(end_load - start_load))
+        # print("rotate time: {}".format(end_rotate - start_rotate))
+        return project_topview(top)
 
 
 
@@ -521,6 +548,9 @@ class OfflineControllerWithSmallRotation(BaseController):
 
     def get_depth(self, state):
         return self.depth[state][:]
+
+    def get_map(self):
+        return self.map
 
     def all_objects(self):
         if self.using_raw_metadata:
